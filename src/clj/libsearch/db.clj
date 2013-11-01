@@ -96,7 +96,7 @@
                                    :db/id (d/tempid :db.part/user)}))))
 
 (defn add-repo [name & {:keys [github-id created updated watchers forks lib-names] :as m}]
-   (comment println
+  (comment println
    (str "adding repo [" name "] with libs " lib-names " and created/updated " created "/" updated ))
   (let [repo-id (d/tempid :db.part/user)
         libs (map #(into {} [[:lib/name %]

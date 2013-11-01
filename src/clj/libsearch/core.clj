@@ -162,25 +162,27 @@
         add-libs-to-db)
     (catch Throwable t
       (println "exception caught whilst processing" (str (:user h) "/" (:repo h)))
-      (.printStackTrace t) h)))
+      (.printStackTrace t)
+      h)))
 
 (defn repo-filter [h]
   (not-empty (:libs h)))
 
-(defn fetch-recursive [& {:keys [fetch proceed-with next-args args]}]
-  (let [f (fn f [f-args]
-            (let [results (apply fetch f-args)
-                  proceed (proceed-with results)]
-              (cond proceed (lazy-cat results (f (next-args f-args results)))
-                    :else (f f-args))))]
-    (f args)))
+(defn fetch-recursive [& {:keys [fetch proceed? next-args args]}]
+  (let [fetching
+        (fn fetching [f-args]
+          (let [results (apply fetch f-args)]
+            (if (proceed? results)
+                (lazy-cat results (fetching (next-args f-args results)))
+                (fetching f-args))))]
+    (fetching args)))
 
 (defn sleep-until [ts-seconds]
   (let [now-seconds (Math/floor (/ (.getTime (java.util.Date.)) 1000))]
-    (cond (> ts-seconds now-seconds)
-          (do (println (- ts-seconds now-seconds) "seconds until rate limit resets")
-              (Thread/sleep 60000)
-              (recur ts-seconds)))))
+    (when (> ts-seconds now-seconds)
+      (println (- ts-seconds now-seconds) "seconds until rate limit resets")
+      (Thread/sleep 60000)
+      (recur ts-seconds))))
 
 (defn rate-limit-remaining []
   (get-in (tentacles.core/api-call :get "rate_limit" nil opts)
@@ -191,8 +193,8 @@
           [:rate :reset]))
 
 (defn handle-ratelimit
-  "check if either the last results were rate limited, or we've got less we might
-need to complete the next batch"
+  "check if either the last results were rate limited, or we've got less we
+  might need to complete the next batch"
   [results]
   (cond (= (:status results) 403)
         (do (println "rate limited!")
@@ -205,12 +207,12 @@ need to complete the next batch"
         :else true))
 
 (defn yaygh [& args]
-  (fetch-recursive :fetch (fn gh-fetch [since]
+  (fetch-recursive :fetch (fn [since]
                             (println "fetching repos since:" since)
                             (repos/all-repos (assoc opts :since since)))
                    :args args
                    :next-args #(list (:id (last (butlast %2))))
-                   :proceed-with handle-ratelimit))
+                   :proceed? handle-ratelimit))
 
 (defn fetch-repos [n since]
   (counter-reset)
@@ -240,8 +242,9 @@ need to complete the next batch"
   (fetch-recursive :fetch fetch-results
                    :initial-args args
                    :next-args #(list (+ (first %1) (count %2)))
-                   :proceed-with (fn [results]
-                                   (cond (:rate-limited results)
-                                         (do (println "sleeping...")
-                                             (Thread/sleep 500))
+                   :proceed? (fn [results]
+                               (cond (:rate-limited results)
+                                     (do (println "sleeping...")
+                                         (Thread/sleep 500)
+                                         false)
                                      :else true))))
